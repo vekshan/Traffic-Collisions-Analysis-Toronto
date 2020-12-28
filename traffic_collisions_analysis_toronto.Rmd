@@ -1,0 +1,771 @@
+---
+title: "Analysing Traffic Collisions in the City of Toronto"
+subtitle: 'SDS 3386 - Final Project'
+author: "Vekshan Bundhoo (300035157), Kabir Bhangoo (300021516) & Sukhsimranpreet Sekhon (300018861)"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_float: yes
+---
+
+```{r, warning=FALSE, message=FALSE}
+
+# load libraries
+
+library(dplyr)
+library(readxl)
+library(janitor)
+library(ggplot2)
+library(skimr)
+library(stringr)
+library(knitr)
+library(readr)
+library(tidyr)
+library(ggmap)
+library(gridExtra)
+library(ggrepel)
+library(lubridate)
+library(lme4)
+library(broom)
+library(kableExtra)
+
+```
+
+# Introduction
+
+Toronto is the largest populated city in Canada that is known by many people across the nation and its own residents as having the worst traffic in the country. This can be seen from how the city has to serve the busiest highway in North America, King's Highway 401, where almost half a million vehicles pass per day through the most dense part of the route. This part travels through Toronto, along sixteen lanes of traffic [1]. 
+
+The City of Toronto Police Service (TPS), after the Ontario Provincial Police (OPP) Service, is the main protecting unit that helps to prevent and stop further traffic collisions from occuring under the City of Toronto Jurisdiction Map. Motor vehicle collisions are recorded by the Collision Reporting Centre (CRC) to help the Ministry of Transportation (MTO) for the Ontario Government in safeguarding and providing assistance to the general public.
+
+One of the data-sets that was created by the joint collaborative efforts of the TPS, CRC and the City of Toronto for the Traffic Collisions Open Data Site is on traffic collisions that resulted in persons being killed or seriously injured in a traffic collision (KSI.csv) for the last 11 years (2008 - 2018) by any type of vehicle. The data-set has the following properties:
+
+- Contains a record for every person involved in a traffic collision
+
+- Each accident has a unique identifier which is the accnum
+
+- Accidents are categorized into two classes: Fatal, Non-Fatal
+
+  - Fatal: at least one victim dies in less than 366 days as a result of the collision
+
+  - Non-Fatal: at least one victim sustains a major injury
+
+We also acquired two additional data-sets from the City of Toronto Open Data Portal that have profiles (neighbourhood-profiles-2016-csv.csv) and geographical information (neighbourhoods.csv) on the cities 140 neighbourhoods. The neighbourhood profiles data-set contains information on overall population size and population diversification through age groups, gender and ethnicity.
+
+# Change in the Mean Number of Accidents from 2008 to 2018 
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.height= 8, fig.width= 12}
+
+# Read in the file:
+
+df <- read.csv("KSI.csv") # Taken from Toronto Police Service Open Data Portal [1]
+
+df <- df %>%
+  clean_names() %>%
+  select(-starts_with("i_"),-starts_with("x"),-y, -index, -offset, -road_class, -accloc, -impactype, -manoeuver, -drivact, -pedtype, -pedact, -pedcond, -cyclistype, -cycact, -disability,-division, -ward_name, -ward_id, -hood_name, -object_id, -motorcycle, -truck, -trsn_city_veh, -emerg_veh, -passenger, -automobile) %>%
+  mutate(date = as.Date((str_sub(as.character(date),1,10)))) # convert date format
+ 
+c <- c("#2C528C","#51A0D5")
+
+df1 <- df %>%
+  distinct(accnum, .keep_all = TRUE)%>%
+  group_by(year,acclass) %>%
+  summarise(total = n()) 
+
+df2 <- df %>% 
+  distinct(accnum, .keep_all = TRUE)%>%  
+  group_by(year) %>%
+  summarise(total = n()) 
+
+plot <-
+  ggplot() +
+  geom_bar(data = df1, aes(x=year, y=total, fill=acclass), stat="identity", position=position_dodge())+
+  geom_line(data = df2, aes(x=year, y = total), size = 1.5)+
+  scale_x_continuous(breaks = df2$year)+
+  theme_minimal()+
+  theme(axis.text.x = element_text(angle = 45))+
+  geom_text(data=df1,aes(x=year, y=total, label=total , group=acclass), 
+            position = position_dodge(0.9),color = "white", vjust = 1.3)+
+  scale_color_manual(values=c)+
+  scale_fill_manual(values = c)
+
+plot
+
+```
+
+### Observations:
+
+- Fatal Accidents:
+    - Lowest in 2011: 35
+    - Highest in 2016: 76
+    - Almost doubled from 2011 to 2018 (1.89 times)
+ 
+- Non-Fatal Accidents:
+  - Lowest in 2015: 285
+  - Increased slightly the next year and remained almost constant throughout the rest of years
+  - Highest in 2012: 409
+  
+# Comparing the Mean Number of all Accidents and Victims recorded for a particular day
+
+The mean number of accidents and victims for the following plots were computed by calculating the mean for each day of a month and disregarding the year, i.e the mean is the mean number of accidents on a specific day occurring from 2008 to 2018.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.height= 10, fig.width= 15}
+
+getMeanTotalByDay <- function(df) {
+  ans <- df %>%
+    group_by(date, acclass) %>%
+    summarise(total = n()) %>%
+    mutate(day = format(date, "%d"),month = format(date, "%m")) %>%
+    group_by(month,day, acclass) %>%
+    summarise(mean_total = mean(total))
+  
+  return(ans)
+}
+
+plotMeanTotalPerDay <- function(df) {
+  plt <- df %>%
+    mutate(date = as.Date(paste(day, month, "1000", sep = "-"),"%d-%m-%Y"))%>%
+    ggplot(aes(x = date, y = mean_total, color = acclass))+
+    geom_line(size = 1)+
+    scale_x_date(breaks = "1 month", date_labels ="%b")+
+    theme_minimal()+
+    scale_color_manual(values=c)
+  
+  return(plt)
+    
+}
+
+#mean no of victims per year
+df_victims_year <- getMeanTotalByDay(df)
+
+# mean no accidents per year
+df_acc_year <- getMeanTotalByDay(df %>% distinct(accnum, .keep_all = TRUE) )  #we consider distinct accidents
+
+p1 <- plotMeanTotalPerDay(df_victims_year)+
+  ggtitle(label = "Mean Number of Victims per Day")
+
+
+p2 <- plotMeanTotalPerDay(df_acc_year)+
+  ggtitle(label = "Mean Number of Accidents per Day")
+
+grid.arrange(p2,p1)
+  
+```
+
+### Observation for Mean Number of Accidents
+
+- Non-Fatal Accidents are generally spread out across the year with April showing a decrease in the middle of the month.
+
+- Most Fatal-Accidents usually occur at the start or end of the month, sometimes in the middle with a mean of 1 accident being recorded otherwise. The maximum mean being recorded is for a day is 2 accidents.
+
+### Observation for Mean Number of Victims
+
+- The peak around the start of July is representative of either a day where usually accidents are frequent every year or a specific year where the number of accidents on that day had several victims. This will be investigated in the next section. 
+
+- Considering Non-Fatal Accidents there seem to be an apparent relationship between the mean number of victims involved in an accident and the mean number of accidents for a particular day of a month. It might be the same for the Fatal-Accidents but the outlier in July may let us think otherwise.
+
+# Investigating 3rd July 
+
+The mean with the highest number of fatal accidents happened to be on the 3rd of July in the data-frame created for the plot. We now proceed to see if it is a specific 3rd of July or just the general trend for every year. 
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+
+df_july <- df %>% filter(acclass == "Fatal") %>%
+  group_by(date, acclass) %>%
+  summarise(total = n()) %>%
+  mutate(day = as.numeric(format(date, "%d")),month = as.numeric(format(date, "%m")), year = as.numeric(format(date, "%Y")))%>%
+  filter(month == 7) %>%
+  filter(day == 3) %>%
+  select(date, acclass)
+
+df_july %>% kable() %>% kable_styling()
+
+```
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+
+df_3_july<-df%>%filter(date=="2013-07-03") %>%
+group_by(accnum,injury) %>%
+  summarise(count = n()) 
+
+df_july_tot<-df%>%filter(date=="2013-07-03") %>%
+group_by(accnum) %>%
+  summarise(victims = n()) 
+
+left_join(df_3_july,df_july_tot) %>% filter(injury %in% c("Major", "Fatal")) %>% arrange(desc(victims)) %>% kable() %>% kable_styling()
+
+```
+
+- The mean with the highest number of victims of Fatal accidents happened to be on the 3rd of July
+
+- We see that there is only one 3rd of July from 2008 to 2018 where Fatal accidents actually occurred
+
+- When we check all accidents that happened on that day, we notice the reason for the peak was an accident involving 12 victims with 3 major injuries and 1 fatal
+
+## Are the mean number of KSI accidents during festive days significantly less than during normal days for the City of Toronto?
+
+The goal is to determine if there is a significant difference between the number of accidents (Fatal and Non-Fatal) for the City of Toronto during the festive days compared to normal days. 
+
+We assume festive days to be only: 
+
+- New Year
+
+- Canada Day
+
+- Christmas 
+
+- Boxing Day
+
+- New Year's Eve
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.height= 10, fig.width= 15}
+
+df_holi <- df %>% distinct(accnum,.keep_all = TRUE) %>%
+  group_by(date, acclass) %>%
+  summarise(total = n()) %>%
+  mutate(day = as.numeric(format(date, "%d")),month = as.numeric(format(date, "%m")), year = as.numeric(format(date, "%Y")))%>%
+  filter(
+  (month == 11 && (day == 25 || day == 26 || day == 31)) ||
+  (month == 7 && day == 1) ||
+  (month == 1 && day ==1) 
+  )
+
+df_not_holi <- df %>% distinct(accnum,.keep_all = TRUE) %>%
+  group_by(date, acclass) %>%
+  summarise(total = n()) %>%
+  mutate(day = as.numeric(format(date, "%d")),month = as.numeric(format(date, "%m")), year = as.numeric(format(date, "%Y")))%>%
+  filter(
+    !(
+      (month == 11 && (day == 25 || day == 26 || day == 31)) ||
+        (month == 7 && day == 1) ||
+        (month == 1 && day ==1) 
+    )
+  ) 
+
+
+t.test(df_holi$total, df_not_holi$total)
+
+```
+
+At a significance level of 0.05, the p-value is greater than the significance level. We fail to reject the null hypothesis that the mean number of accidents on festive days is equal to the mean for normal days.
+
+# Geographic Heat Map for the City of Toronto
+
+How did the number of KSI accident occurrences affect the overall City of Toronto Jurisdiction Map over the course of 11 years (2008 - 2018)?
+
+In-order to see this impact, the following heat-map was created that would allow us to showcase a graphical representation of the data that involved spatial locations, in this case, the longitude and latitude coordinates of all the accidents.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10}
+
+ggmap::register_google(key = "AIzaSyAW6yd4WtBkeTq3lQxg4wqL95YNrt_Q9Ik")
+
+data_source1 <- df %>% distinct(accnum, .keep_all = TRUE) #only for distinct accidents, probably have a function all types we need distinct up also
+
+qmap(c(lon = -79.381050, lat = 43.641800), zoom = 11, source = "stamen", maptype = "terrain") + 
+  geom_density2d(data = data_source1, aes(x = longitude, y = latitude), size = 0.25) +
+  stat_density2d(data = data_source1, aes(x = longitude, y = latitude, fill = ..level..), size = 0.01, bins = 16, alpha = 0.3, geom = "polygon")+ 
+  ggtitle(label = "Volume of Traffic Collisions for the City of Toronto")+theme(plot.title = element_text(hjust = 0.5)) 
+
+```
+
+* The main lighter blue region on the map represents the area that has the highest volume of KSI accidents obtained from the distinction of accidents in the data-set. 
+
+* This seems to be contained within the city centre area (downtown core) which contains major businesses, municipal and provincial governments, tourist attractions, three universities and many shopping destinations.
+
+* Other noticeable regions spread throughout the city jurisdiction have lower volumes.
+
+* There are no similar regions to the prevalent one. The King's Highway 401 has patches of low to mid volumes of accidents, but it differs significantly to the major region.
+
+* Does this suggest that having larger volumes of people in an area will cause a higher volume of traffic collisions?
+
+* However, this geographic distribution does not give the full picture of the vicinity in which the accidents are occurring. How can we reach a better understanding of why these accidents are occurring?
+
+## A Closer Look: Downtown Toronto
+
+In an attempt to determine why this main region had the highest volume of KSI accident occurrences, the corresponding heat-map was created:
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10}
+
+# Table containing the coordinates of the two major highway exits/entrances, two major destinations and the prevalent point:
+highway_exits <- tibble(long = -79.381050, lat = 43.641800, location_name = "York St.") %>% add_row(long = -79.37800, lat = 43.643337, location_name = "Bay St.") %>% add_row(long = -79.386451, lat = 43.650463, location_name = "University Ave.") %>% add_row(long = -79.3806, lat = 43.6453, location_name = "Union Station") %>% add_row(long = -79.3807, lat = 43.6544, location_name = "Eaton Centre") %>% add_row(long = -79.379424, lat = 43.6491589, location_name = "King St.")
+
+qmap(c(lon = -79.381050, lat = 43.641800), zoom = 15, source = "stamen", maptype = "terrain") + 
+  geom_density2d(data = data_source1,aes(x = longitude, y = latitude), size = 0.25) +
+  stat_density2d(data = data_source1,aes(x = longitude, y = latitude, fill = ..level..), size = 0.01, bins = 16, alpha = 0.3, geom = "polygon") +
+  geom_point(data = highway_exits,aes(x = long, y = lat, stroke = 2), colour="red", size =1.5)+
+  geom_label_repel(
+    aes(x=long, y=lat, label = location_name),
+    data = highway_exits,
+    family = 'Times', 
+    size = 5, 
+    box.padding = 0.2, point.padding = 0.3,
+    segment.color = 'grey50')+
+  ggtitle(label="Volume of Traffic Collisions in the Main Region")+theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+* Neither of the highway exits and entrances at York St. or Bay St. are the most prevalent accident occurrence points in the city.
+
+* The central transit hub for the city, Union Station, is low in volume. While King St., which houses some of the major financial and banking companies in the city, is also lower in accident volume.
+
+* The most collisions occur around the University Ave. point near Toronto City Hall. This area contains Nathan Phillips Square which is a major tourist attraction and travelling point for commuters, several high-end hotels, and Eaton Centre which is Toronto's historic mall.
+
+* University Ave. is a significant two-way road that houses three of Toronto's Hospitals (General, Sick Kids and Mount Sinai), Queen's Park and University of Toronto ST. George.
+
+* This might suggest that because many people work, travel through and use these points on a daily basis, the reason for a higher volume of accident results from the congestion of people on the road.
+
+# Population Density
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10}
+
+# Read in the file:
+
+population_neighbourhoods <- read.csv("neighbourhood-profiles-2016-csv.csv") # Taken from City of Toronto Open Data Portal [2]
+
+population_neighbourhoods <- population_neighbourhoods %>% 
+  clean_names() %>%
+  select(-x_id, -category, -topic, -data_source, -characteristic, -city_of_toronto)
+
+population_neighbourhoods_1 <- population_neighbourhoods[c(1),] %>% 
+  add_rownames() %>%
+  pivot_longer(-rowname,names_to = "Neighbourhood_name", values_to = "hood_name")
+
+population_neighbourhoods_2 <- population_neighbourhoods[c(3),] %>% 
+  add_rownames() %>%
+  pivot_longer(-rowname,names_to = "Neighbourhood_name", values_to = "population")
+
+population_neighbourhoods <- left_join(population_neighbourhoods_1, population_neighbourhoods_2, by = "Neighbourhood_name") %>%
+  select(-rowname.x, -rowname.y) %>%
+  mutate(population = as.numeric(str_remove(population,",")))
+
+#population_neighbourhoods
+
+neighbourhood_information <- read.csv("Neighbourhoods.csv") # Taken from City of Toronto Open Data Portal [3]
+  
+neighbourhood_information <- neighbourhood_information %>% 
+  clean_names() %>%
+  select(-x_id, -area_id, -area_attr_id, -parent_area_id, area_short_code, -area_long_code, -area_desc, -x, -y, -objectid, -geometry) %>%
+  rename(hood_name = area_short_code, neighbourhood_name = area_name) %>%
+  mutate(hood_name = as.character(hood_name))
+
+ratio <- 630.2/sum(neighbourhood_information$shape_area) # use to scale to map area of toronto being 630 km^2
+
+neighbourhood_information <- neighbourhood_information %>%
+  mutate(area = shape_area * ratio)
+
+neighbourhood_information <- neighbourhood_information %>%
+  left_join(population_neighbourhoods, by = "hood_name") %>%
+  select(-Neighbourhood_name) %>%
+  mutate(population_density = population / area) %>%
+  mutate(
+    size = case_when(
+      area>=quantile(neighbourhood_information$area, 0.75)~'huge',
+      area>=quantile(neighbourhood_information$area,0.5)~'big',
+      area>=quantile(neighbourhood_information$area,0.25)~'small',
+      TRUE~'tiny'
+    )
+  )
+
+#sum(neighbourhood_information$population)/630.2
+
+```
+
+The area of a neighbourhood was estimated by using the City of Toronto's 140 Neighbourhoods Geographical Information data-set (neighbourhoods.csv) that contained the boundaries of the neighbourhoods and estimated the actual area from the area of the map.We assumed the summation of the shape_area for all neighbourhoods in the data set to be equivalent to the area of Toronto being $630.2$ $km^2$ and proceeded to find a ratio to get the actual area for each neighbourhood.
+$$\sum_{i=1}^{140} shape\_area_i \equiv 630.2 km^{2}$$
+
+The neighbourhoods were the divided into different sizes to be able to draw a better conclusion for the next section. The sizes were defined as follows:
+
+- Tiny: area $<$ 0.25 quantile
+
+- Small: 0.25 quantile $\leq$ area $<$ 0.5 quantile
+
+- Big: 0.5 quantile $\leq$ area $<$ 0.75 quantile
+
+- Huge: area $\geq$ 0.75 quantile
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10}
+
+qmap(c(lon = -79.381050, lat = 43.641800), zoom = 11, source = "stamen", maptype = "terrain") + 
+  geom_point(data=neighbourhood_information, aes(x=longitude,y=latitude,size=population_density, color = size))
+
+#  geom_density2d(data = neighbourhood_information, aes(x = longitude, y = latitude), size = 0.25) +
+#  stat_density2d(data = neighbourhood_information, aes(x = longitude, y = latitude, fill = ..level..), size = 0.01, bins = 16,
+#alpha = 0.3, geom = "polygon") +
+#  scale_alpha(range = c(0,0.3), guide = FALSE)
+
+```
+
+# Population Density vs. Accidents
+
+In this section, we investigate the relationship between population density and total accidents by neighbourhood size:
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10}
+
+df_acc_pop <- df %>% distinct(accnum, .keep_all = TRUE) %>%
+  mutate(hood_id = as.character(hood_id)) %>%
+  group_by(hood_id, acclass) %>%
+  summarise(total = n()) %>%
+  inner_join(neighbourhood_information, by = c("hood_id"="hood_name")) %>%
+  select(acclass,hood_id, total, neighbourhood_name, population, population_density ,area, size) 
+
+df_acc_pop %>%
+  ggplot(aes(x=population_density, y = total, color = size))+
+  geom_point()+
+  facet_wrap(~ acclass) +
+  geom_smooth(se=FALSE, method='lm')
+  
+```
+
+- The sample for Fatal Accidents might be too small to notice any apparent relationships so we will focus on Non-Fatal Accidents. 
+
+- For huge, big and small neighbourhoods there seems to be a positive linear relationship between population density and number of Non-Fatal accidents.
+
+- For the tiny neighbourhoods, the points are more scattered but we also know from the heat map that accidents are concentrated near regions that are ‘tiny’. There is also a tiny ward with population density above 40000 that might be an outlier in the graph.
+
+- We will check how similar they are and if the results are conclusive in the next section.
+
+## Regression for Non-Fatal Accidents
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10, fig.height= 10}
+#df_reg <- df_acc_pop%>% filter(acclass != "Fatal")
+
+#fit_acc <- lmList(total ~ population_density | type, data=df_reg)
+
+#fit_acc
+
+mdl <- df_acc_pop %>% group_by(size) %>% do (model = lm(total ~ population_density, data = .)) 
+
+mdl %>% glance(model) %>% select(size,r.squared, p.value) %>% kable() %>% kable_styling()
+
+```
+
+- Huge and Tiny: the p-value is greater than significance level of 0.05, and low r.squared means that the model doesn’t explain much of variation of the data and it is not significant.
+
+- Big and Small: the p-value is smaller than the significance level of 0.05, the r.squared explains around 8% and 17% of the variance in the data respectively.
+
+- The number of accidents increases with increasing population density for small and big neighbourhoods but the population density will not be an accurate predictor of number of accidents due to unexplained variance.
+
+### Possible Explanation and Suggestions:
+
+- Investigate and remove outliers for the population density vs. total non-fatal accidents regression part for tiny neighbourhoods especially because we know that accidents are more concentrated near tiny regions.
+
+# Distribution of Injury Type by Age Group
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10, fig.height= 10}
+df_age <- df %>% select(invage, injury) %>%
+  filter(invage != "unknown") %>%
+  filter(injury != "None") %>%
+  filter(injury != " ") %>%
+  group_by(invage, injury) %>%
+  summarise(total = n())
+
+levels(df_age$invage)[levels(df_age$invage)=="5 to 9"] <- "05 to 09"
+levels(df_age$invage)[levels(df_age$invage)=="0 to 4"] <- "00 to 04"
+
+plt_age <- df_age %>% ggplot() +
+  geom_bar(aes(x=as.character(invage), y=total, fill=injury), stat="identity", position=position_dodge())+
+  theme_minimal()+
+  #scale_color_brewer("Dark2")+
+  #scale_fill_brewer("Dark2") + 
+  coord_flip()+
+  labs( x="Age Group")+
+  guides(fill=guide_legend(title="Injury Type"))
+
+plt_age
+
+```
+
+- More people in the 20 - 29 age range are victims of major injuries. That does not mean that they are “more prone” to those type of injuries, they might just be more present on the road.
+
+- In the geographic heat map, we also know that more accidents happened downtown which might be frequented by people of this age range.
+
+- There is also a rise at the 50 - 54 age group.
+
+- To have a better understanding of why there are more victims in these age ranges, we should have a look at the road users demographic in the different neighbourhoods.
+
+# More Accidents occur during Rush Hour
+
+The following plots show the when fatal and non-fatal accidents have occurred in our data-set. The number of fatal accidents is relatively low compared to the number of non-fatal accidents, so the relations are more evident in the non-fatal heat-map.
+ 
+There appear to be more accidents occurring later in the day (between 4pm and 7pm), which would be around the time that residents would be getting off of work. However, there are fewer accidents in the morning which is when people would be going to work. This might suggest that the accident numbers are much higher at night because people are rushing home or are more careless once finishing work.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10, fig.height= 10}
+
+df_road <- df %>% distinct(accnum, .keep_all = TRUE)
+
+# Accident Frequency (Heat Map)
+
+dayofweek <- function(data, type) {
+    
+  data <- data %>%
+    distinct(accnum, .keep_all = TRUE) %>%
+    filter(acclass == type) %>%
+    select(date, hour) %>%
+    mutate(dayofweek = weekdays(as.POSIXct(date), abbreviate = F)) %>%
+    select(-date)
+    
+  return(data)
+    
+}
+
+rearrange <- function(data) {
+  data <- data %>%
+  group_by(hour, dayofweek) %>%
+  arrange(dayofweek) %>%
+  summarise(occurences = n())
+
+# Ref1
+data$dayofweek <- factor(data$dayofweek, levels= c("Sunday", "Monday", 
+    "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+
+return(data[order(data$dayofweek), ])
+  
+}
+
+createplot <- function(data, type) {
+  data %>%
+  ggplot(aes( x = hour, y = dayofweek, fill = occurences))+
+  geom_tile() +
+  scale_fill_gradient(low="white", high="red") +
+  labs(
+    x = 'Hours',
+    y = 'Days of the Week',
+    title = paste(paste('Frequency of', type, sep = " "), 'Car Accidents at Different Times During the Week', sep = " "),
+     fill = '# of Occurrences'
+  ) + 
+  coord_flip() +
+  theme(plot.margin = margin(3,10,3,10, "mm"),
+        plot.background = element_rect(fill = "white"))
+}
+
+dowF <- createplot(rearrange(dayofweek(df, "Fatal")), "Fatal")
+
+dowNF <- createplot(rearrange(dayofweek(df, "Non-Fatal Injury")), "Non-Fatal Injury")
+
+grid.arrange(dowF, dowNF)
+
+```
+
+# Impact of Weather and Road Conditions on Number of Accidents
+ 
+The effects of weather could have a significant impact on the number of accidents and the type of accidents that occur.
+ 
+In order to see if the weather made any real difference in the type of accident (fatal or non-fatal), the data was separated based on the class of the accident. The accidents were classified as ideal or imperfect. The definitions are as follows:
+ 
+- Ideal accident: All conditions pertaining to the road were normal, i.e. visibility was clear, light was 'not dark', and the road condition was dry.
+ 
+- Imperfect accident: Any accident that did not have all the above characteristics was classified as imperfect.
+ 
+As the following plot shows, there is little difference between the two classes of conditions. This may indicate that weather has no real effect on the safety of a driver.
+
+```{r, warning=FALSE, message=FALSE, fig.align='center'}
+
+# Weather effect
+ideal_conditions <- function(data) {
+    
+  data <- data %>%
+    distinct(accnum, .keep_all = TRUE) %>%
+    select(visibility, light, rdsfcond, acclass) %>%
+    group_by(visibility, light, rdsfcond, acclass) %>%
+    arrange(visibility, light, rdsfcond, acclass) %>%
+    summarise(n = n()) %>%
+    filter(visibility != " ", rdsfcond != " ") %>%
+    filter(str_detect(visibility, pattern="Clear")) %>%
+    filter(str_detect(rdsfcond, pattern="Dry")) %>%
+    filter(!str_detect(light, pattern="Dark"))
+  
+  return(data)
+}
+
+non_ideal_conditions <- function(data) {
+  
+  data <- data %>%
+    distinct(accnum, .keep_all = TRUE) %>%
+    select(visibility, light, rdsfcond, acclass) %>%
+    group_by(visibility, light, rdsfcond, acclass) %>%
+    arrange(visibility, light, rdsfcond, acclass) %>%
+    summarise(n = n()) %>%
+    filter(visibility != " ", rdsfcond != " ") %>%
+    filter(visibility != "Clear" | rdsfcond != "Dry" | light == "Dark")
+  
+  return(data)
+}
+
+conditions_plot <- function(data1, data2, title1, title2) {
+
+  data1 <- data1 %>%
+    ungroup() %>%
+    select(acclass, n)
+  
+  data2 <- data2 %>%
+    ungroup() %>%
+    select(acclass, n)
+ 
+  Fatal_v1 <- (data1$acclass=='Fatal')
+  Fatal_df1 <- data1[Fatal_v1,]
+  Fatal_s1 <- sum(Fatal_df1$n)
+  
+  Fatal_v2 <- (data2$acclass=='Fatal')
+  Fatal_df2 <- data2[Fatal_v2,]
+  Fatal_s2 <- sum(Fatal_df2$n)
+
+  Non_Fatal_v1 <- (data1$acclass=='Non-Fatal Injury')
+  Non_Fatal_df1 <- data1[Non_Fatal_v1,]
+  Non_Fatal_s1 <- sum(Non_Fatal_df1$n)
+  
+  Non_Fatal_v2 <- (data2$acclass=='Non-Fatal Injury')
+  Non_Fatal_df2 <- data2[Non_Fatal_v2,]
+  Non_Fatal_s2 <- sum(Non_Fatal_df2$n)
+  
+  sum_d1 <- Fatal_s1 + Non_Fatal_s1
+  sum_d2 <- Fatal_s2 + Non_Fatal_s2
+  
+  ans <-  data.frame(
+    type = c('Fatal','Fatal','Non-Fatal','Non-Fatal'), 
+    class = c(title1, title2, title1, title2), 
+    sum = c(Fatal_s1/sum_d1, Fatal_s2/sum_d2, Non_Fatal_s1/sum_d1, Non_Fatal_s2/sum_d2)) %>%
+    
+    ggplot(aes(x = type, y = sum*100, fill = class)) +
+    geom_col(stat="identity", position=position_dodge()) +
+    labs(
+    x = 'Type of Accident',
+    y = 'Percentage of Accidents'
+    ) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme_minimal()  +
+    scale_color_manual(values=c)+
+    scale_fill_manual(values = c)
+  
+  return(ans)
+}
+
+cp <- conditions_plot(ideal_conditions(df), non_ideal_conditions(df), "Ideal", "Imperfect")
+cp
+
+```
+
+This seemed a bit odd so we decided to look closer at the most impactful conditions and their types in the next section.
+
+# Deeper Dive: Exploring Individual Conditions
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 20}
+individual_conditions <- function(data, condition) {
+  
+  ans <- data %>%
+    select(visibility, light, rdsfcond, acclass) %>%
+    group_by(data[[condition]], acclass) %>%
+    arrange(data[[condition]], acclass) %>%
+    summarise(n = n()) %>%
+    rename(condition = "data[[condition]]")
+    
+  return (ans)
+}
+
+
+visibility <- individual_conditions(df %>%
+  distinct(accnum, .keep_all = TRUE) %>%
+    filter(visibility != " ")
+    , "visibility") %>%
+  mutate(type = paste("Visibility:", condition, sep = " "))
+ 
+  
+light <- individual_conditions(df %>%
+  distinct(accnum, .keep_all = TRUE), "light") %>%
+  mutate(type = paste("Lighting:", condition, sep = " "))
+
+road_condition <- individual_conditions(df %>%
+  distinct(accnum, .keep_all = TRUE)  %>%
+    filter(rdsfcond != " "), "rdsfcond") %>%
+  mutate(type = paste("Road condition:", condition, sep = " "))
+
+
+total <- rbind(visibility, light, road_condition)
+
+total <- head(total[order(-total$n),], n=10)
+
+plot_conditions <- function(data) {
+  data <- data %>%
+    ggplot(aes(x = type, y = n, fill = acclass)) +
+    geom_col() +
+    labs(
+      x = 'Condition',
+      y = 'Number of Occurrences'
+      ) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    theme_minimal()+
+    scale_color_manual(values=c)+
+  scale_fill_manual(values = c)+
+    theme(text = element_text(size=15))+
+    coord_flip()
+
+  return(data)
+}
+
+t <- plot_conditions(total) 
+t
+
+```
+
+### Possible Explanation and Suggestions:
+ 
+- It is very likely the conditions described as "perfect" in the first section happen mostly during rush hour which affects the number of accidents.
+ 
+- As we have seen in a previous section, the number of accidents is also different depending on the time of the day. We should possibly try to include this factor in.
+ 
+- Moreover, the average distance travelled by any person is not the same at every hour. This might also affect the results.
+ 
+- A suggestion would be to take the mean distance travelled by any person at the different hours of the day and check what road/weather conditions are most likely to be present during that time.
+
+# Comments & Further Explorations
+
+- Useful data-sets that can be used if found: 
+  
+  - Traffic volume for Toronto to see if a relationship exists with number of accidents
+  
+  - Mean distance travelled at different hours of the day and check in what road/weather conditions people are most likely to travel during the day according to time of the day
+
+- Being able to show the boundaries of the neighbourhoods on the maps
+
+- In order to make conclusions more accurate, it would be beneficial to look at other factors of the accidents, such as the mean time spent driving, the speed of the vehicle, the distance from their home.
+
+- When considering the total number of car accidents, it would be interesting to see how often they occur near school areas or residential areas, especially in the morning when there are increased number of buses and children on the roads as well as adults going to work.
+
+# References
+
+**Data-sets:**
+
+* [1] Killed or Seriously Injured (KSI) Data Set (Open Data License): https://data.torontopolice.on.ca/datasets/ksi
+
+* [2] City of Toronto Neighbourhood Profiles - 2016 (Open Data License): https://open.toronto.ca/dataset/neighbourhood-profiles/
+
+* [3] City of Toronto Neighbourhoods (Open Data License): https://open.toronto.ca/dataset/neighbourhoods/
+
+**Sources:**
+
+* [4] Article on King's Highway 401 in Ontario: https://oppositelock.kinja.com/the-busiest-highway-in-north-america-1559577839
+
+* [5] CBC Article on Toronto Traffic Collisions: https://www.cbc.ca/news/canada/toronto/new-toronto-police-team-to-crack-down-on-dangerous-drivers-amid-rise-in-traffic-deaths-1.5369091
+
+# Appendix: 
+
+## Testing if agressive driving is independent of alcohol consumption with a significance level of 0.05
+
+```{r, warning=FALSE, message=FALSE, fig.align='center', fig.width= 10, fig.height= 10}
+
+df_alco <- df %>% select(alcohol, ag_driv)
+
+#tidyverse not working
+levels(df_alco$ag_driv)[levels(df_alco$ag_driv)==" "] <- "No"
+levels(df_alco$alcohol)[levels(df_alco$alcohol)==" "] <- "No"
+
+tbl <- table(df_alco)
+chisq.test(tbl) 
+
+```
+
+## sessionInfo:
+
+```{r}
+sessionInfo()
+```
